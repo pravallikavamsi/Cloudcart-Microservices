@@ -1,0 +1,18 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: cloudcart-services
+  namespace: ecommerce
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+    - ecommerce
+  selector:
+    matchLabels:
+      cloudcart-monitor: "true"
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 15s

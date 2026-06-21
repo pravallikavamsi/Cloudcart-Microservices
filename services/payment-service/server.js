@@ -1,0 +1,17 @@
+const express = require("express");
+const cors = require("cors");
+const mysql = require("mysql2/promise");
+const client = require("prom-client");
+const app = express(); const PORT = process.env.PORT || 3000;
+app.use(cors()); app.use(express.json()); client.collectDefaultMetrics();
+const requests = new client.Counter({ name: "payment_service_http_requests_total", help: "Total HTTP requests", labelNames: ["method", "path", "status"] });
+const successCounter = new client.Counter({ name: "payment_service_success_total", help: "Successful payments" });
+const failureCounter = new client.Counter({ name: "payment_service_failed_total", help: "Failed payments" });
+app.use((req, res, next) => { res.on("finish", () => requests.inc({ method: req.method, path: req.path, status: String(res.statusCode) })); next(); });
+const pool = mysql.createPool({ host: process.env.MYSQL_HOST || "mysql", user: process.env.MYSQL_USER || "root", password: process.env.MYSQL_PASSWORD || "root123", database: "payment_db", waitForConnections: true, connectionLimit: 10 });
+app.get("/health", (req, res) => res.json({ service: "payment-service", status: "ok" }));
+app.get("/ready", async (req, res) => { try { await pool.query("SELECT 1"); res.json({ ready: true }); } catch (e) { res.status(500).json({ ready: false, error: e.message }); } });
+app.get("/metrics", async (req, res) => { res.set("Content-Type", client.register.contentType); res.end(await client.register.metrics()); });
+app.post("/payments/pay", async (req, res) => { const { orderId, amount, cardNumber } = req.body; const status = String(cardNumber) === "0000" ? "FAILED" : "SUCCESS"; const transactionId = `TXN-${Date.now()}`; await pool.execute("INSERT INTO payments (order_id, amount, status, transaction_id) VALUES (?, ?, ?, ?)", [orderId, amount, status, transactionId]); status === "SUCCESS" ? successCounter.inc() : failureCounter.inc(); res.json({ orderId, amount, status, transactionId }); });
+app.get("/payments/:orderId", async (req, res) => { const [rows] = await pool.execute("SELECT * FROM payments WHERE order_id = ? ORDER BY id DESC", [req.params.orderId]); res.json(rows); });
+app.listen(PORT, () => console.log(`payment-service running on ${PORT}`));
